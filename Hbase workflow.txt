@@ -1,0 +1,228 @@
+
+Before loading the dataset into HBase, a few preparatory steps are required to ensure the system is ready and the data is formatted correctly:
+
+Step 1: Verify HBase Installation
+
+	1.	Check if HBase is Installed:
+	•	Verify that HBase is installed on the server:
+	
+	bash
+	hbase version
+	
+	2. Open HBase Shell:
+	•	Test access to HBase:
+	
+	bash
+	hbase shell
+	
+Step 2: Create the Table
+
+	1.	Create the required table in HBase with appropriate column families.
+	•	Open the HBase shell:
+	
+		•	Execute the following command:
+		create 'Building_Efficiency', 'Building_Info', 'Energy_Performance', 'Emissions_Compliance'
+
+create 'Building_Efficiency', 'Building_Info', 'Energy_Performance', 'Emissions_Compliance' in the HBase 
+shell is used to create a new table named Building_Efficiency with three column families: Building_Info, 
+Energy_Performance, and Emissions_Compliance.
+
+
+	2.	Verify the Table Exists:
+	bash
+	list
+	
+		3.	Format Data for HBase:
+	•	Each row should map to:
+	•	A row key (e.g., BUILDING ID).
+	•	Columns mapped to column families (e.g., CARBON DIOXIDE EMISSIONS under Emissions_Compliance).
+	
+
+Step 4: Prepare the Python Environment
+
+	1.	Install Required Libraries:
+	•	Install Python libraries (happybase and pandas):
+	
+	bash
+	pip3 install happybase pandas
+	
+	2.	Verify Python and Library Versions:
+	•	Check Python version:
+	
+	bash
+	python3 --version
+	
+	•	Test library installation:
+	
+	bash
+	python3 -c "import happybase, pandas; print('Libraries installed successfully')"
+	
+	Step 5: Update the Python Script
+
+	1.	Update the hbase_loader.py script with the correct file path and HBase server configuration:
+	•	Set the dataset file path:
+	
+	python
+	file_path = '/path/to/EBEWE_cleaned_energy_data.txt'
+	
+	•	Set HBase connection details:
+	
+	python
+	connection = happybase.Connection('localhost')  # Replace 'localhost' with the HBase server address
+
+
+	2.	Ensure the script correctly maps data fields to column families.
+	
+	
+	Step 6: Test the Setup
+
+	1.	Run a Test Insert:
+	•	Insert a single row into HBase to validate the connection:
+	
+	bash
+	put 'Building_Efficiency', '486833000000.0', 'Building_Info:GROSS_BUILDING_FLOOR_AREA', '66056'
+	
+		2.	Scan the Table:
+	•	Verify the data was inserted:
+	
+	bash
+	scan 'Building_Efficiency'
+	
+	Step 7: Backup the Dataset
+
+	•	Before proceeding with bulk data loading, create a backup of the original dataset.
+	
+	Once these steps are complete, proceed to run the full ingestion script (hbase_loader.py) 
+	or bulk import tool. Let me know if you need further clarification!
+	
+	
+LOAD Dataset
+
+Step 1: Inspect the Dataset
+
+	•	The file has tab-separated columns:
+	•	BUILDING ID
+	•	CARBON DIOXIDE EMISSIONS
+	•	GROSS BUILDING FLOOR AREA
+	•	PROPERTY TYPE
+	•	SITE ENERGY USE INTENSITY (EUI)
+	•	WEATHER NORMALIZED SITE ENERGY USE INTENSITY (EUI)
+	•	YEAR BUILT
+	•	LADBS Building Category
+
+Method 1: Load Using HBase Shell
+
+If the dataset is relatively small, you can format it for direct HBase shell usage.
+	1.	Prepare Data in Put Commands Format:
+	•	Transform each row into HBase commands:
+
+put 'Building_Efficiency', '<BUILDING_ID>', 'Building_Info:GROSS_BUILDING_FLOOR_AREA', '<GROSS_BUILDING_FLOOR_AREA>'
+put 'Building_Efficiency', '<BUILDING_ID>', 'Emissions_Compliance:CARBON_DIOXIDE_EMISSIONS', '<CARBON_DIOXIDE_EMISSIONS>'
+
+•	Example for row:
+
+486833000000.0	2.6	66056	Self-Storage Facility	0.7	0.6	2009	50,000 to 99,999 sqft
+
+Convert to:
+
+put 'Building_Efficiency', '486833000000.0', 'Building_Info:GROSS_BUILDING_FLOOR_AREA', '66056'
+put 'Building_Efficiency', '486833000000.0', 'Building_Info:PROPERTY_TYPE', 'Self-Storage Facility'
+put 'Building_Efficiency', '486833000000.0', 'Energy_Performance:SITE_EUI', '0.7'
+
+Method 2: Bulk Load Using Python Script
+
+For large datasets, automate the process.
+	1.	Install Required Libraries:
+	
+	bash
+	pip install happybase pandas
+	
+		2.	Write the Python Script:
+Save the following script as hbase_loader.py.
+
+import happybase
+import pandas as pd
+
+# Connect to HBase
+connection = happybase.Connection('localhost')  # Replace with your HBase server address
+connection.open()
+
+# Load dataset
+file_path = '/mnt/data/EBEWE_cleaned_energy_data.txt'  # Adjust to the correct path
+data = pd.read_csv(file_path, delimiter='\t')
+
+# Create table if not exists
+def create_table():
+    tables = connection.tables()
+    if b'Building_Efficiency' not in tables:
+        connection.create_table(
+            'Building_Efficiency',
+            {
+                'Building_Info': dict(),
+                'Energy_Performance': dict(),
+                'Emissions_Compliance': dict()
+            }
+        )
+        print("Table 'Building_Efficiency' created.")
+    else:
+        print("Table already exists.")
+
+create_table()
+
+# Insert data into HBase
+def insert_data():
+    table = connection.table('Building_Efficiency')
+    for _, row in data.iterrows():
+        row_key = str(row['BUILDING ID'])
+        table.put(
+            row_key,
+            {
+                'Building_Info:GROSS_BUILDING_FLOOR_AREA': str(row['GROSS BUILDING FLOOR AREA']),
+                'Building_Info:PROPERTY_TYPE': row['PROPERTY TYPE'],
+                'Energy_Performance:SITE_EUI': str(row['SITE ENERGY USE INTENSITY (EUI)']),
+                'Energy_Performance:WEATHER_NORMALIZED_SITE_EUI': str(row['WEATHER NORMALIZED SITE ENERGY USE INTENSITY (EUI)']),
+                'Building_Info:YEAR_BUILT': str(row['YEAR BUILT']),
+                'Emissions_Compliance:CARBON_DIOXIDE_EMISSIONS': str(row['CARBON DIOXIDE EMISSIONS']),
+                'Building_Info:LADBS_Building_Category': row['LADBS Building Category']
+            }
+        )
+        print(f"Inserted data for BUILDING_ID: {row_key}")
+
+insert_data()
+connection.close()
+
+
+	3.	Run the Python Script:
+	
+	bash
+	python hbase_loader.py
+	
+	
+	Commands to Verify Data
+
+After loading, verify the data in HBase using these shell commands:
+	1.	List All Tables:
+	
+	shell
+	list
+	
+	2.	Scan the Table:
+	shell
+	scan 'Building_Efficiency'
+		
+		
+	3.	Get a Specific Row:
+			
+	shell
+	get 'Building_Efficiency', '486833000000.0'
+			
+			
+	4.	Count Total Rows:
+				
+	shell
+	count 'Building_Efficiency'
+				
+	5.	Describe the Table Schema:
+					
+	shell
+	describe 'Building_Efficiency'
